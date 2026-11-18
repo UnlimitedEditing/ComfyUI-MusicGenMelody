@@ -128,7 +128,12 @@ class ImageToMusicBrief:
                 "style_hint": ("STRING", {"multiline": True, "default": ""}),
                 "max_new_tokens": ("INT", {"default": 96, "min": 16, "max": 512}),
                 "model_dir": ("STRING", {"default": "Qwen/Qwen2.5-VL-3B-Instruct"}),
-            }
+            },
+            "optional": {
+                # Empty = the built-in film-music-supervisor instruction (unchanged behaviour). Non-empty replaces it,
+                # so each workflow can ask the vision model for something different.
+                "instruction": ("STRING", {"multiline": True, "default": ""}),
+            },
         }
 
     RETURN_TYPES = ("STRING", "STRING")
@@ -136,7 +141,7 @@ class ImageToMusicBrief:
     FUNCTION = "run"
     CATEGORY = "MusicGenMelody"
 
-    def run(self, image_url, image_filename, style_hint, max_new_tokens, model_dir):
+    def run(self, image_url, image_filename, style_hint, max_new_tokens, model_dir, instruction=""):
         import torch
         from PIL import Image
         from transformers import AutoProcessor
@@ -151,15 +156,15 @@ class ImageToMusicBrief:
         img = Image.open(io.BytesIO(data)).convert("RGB")
         img.thumbnail((896, 896))  # bound the vision-token count
 
-        if model_dir == "Qwen/Qwen2.5-VL-3B-Instruct":
-            model_dir = _local_or_id("vlm", "Qwen2.5-VL-3B-Instruct", model_dir)
+        if model_dir and not os.path.isdir(model_dir) and "/" in model_dir:
+            model_dir = _local_or_id("vlm", model_dir.split("/")[-1], model_dir)
         processor = AutoProcessor.from_pretrained(model_dir)
         dev = "cuda" if torch.cuda.is_available() else "cpu"
         model = VLM.from_pretrained(
             model_dir, torch_dtype=torch.bfloat16 if dev == "cuda" else torch.float32).to(dev)
 
         messages = [
-            {"role": "system", "content": BRIEF_SYSTEM},
+            {"role": "system", "content": (instruction or "").strip() or BRIEF_SYSTEM},
             {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": BRIEF_USER}]},
         ]
         text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
